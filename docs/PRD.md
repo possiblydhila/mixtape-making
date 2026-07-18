@@ -5,7 +5,7 @@
 > add or change a feature, update the relevant section and add an entry to the
 > [Changelog](#changelog).
 
-- **Status:** In active development (v0.1.0)
+- **Status:** In active development (v0.2.0)
 - **Last updated:** 2026-07-19
 - **Owner:** developer@ultravoucher.co.id
 
@@ -15,10 +15,11 @@
 
 ### 1.1 What it is
 Mixtape is a web app for making a **customizable virtual cassette mixtape** for
-someone. A creator designs a cassette (colors, label, font), fills Side A / Side B
-with songs (via Spotify search, a pasted Spotify playlist, or manual entry), writes
-a short handwritten-style note, and saves it. Every saved mixtape gets a permanent,
-shareable link and can be exported as a PNG card.
+someone. A creator designs a single-sided cassette (colors, label, font) whose front
+shows the mixtape title, fills it with songs (via Spotify search, a pasted Spotify
+playlist, or manual entry), writes a short handwritten-style note that appears on the
+**back** of the cassette (flip to read it), and saves it. Every saved mixtape gets a
+permanent, shareable link and can be exported as a PNG card.
 
 ### 1.2 Vision & tone
 Recreate the sentimental, tactile ritual of making a mixtape for someone special —
@@ -40,20 +41,21 @@ on dark, a live SVG cassette with spinning reels, handwritten (Caveat) and typew
 ### 2.1 Personas
 - **Creator** — makes a mixtape for a friend/partner. Primary user; the whole build
   experience is for them.
-- **Recipient** — opens a shared link to view the mixtape, flip sides, preview
-  tracks, and see the note. Read-only.
+- **Recipient** — opens a shared link to view the mixtape, flip the cassette to read
+  the note, preview tracks, and see the tracklist. Read-only.
 
 ### 2.2 Primary flow (creator)
 1. Land on `/` ("Make a Mixtape").
-2. Customize the cassette (live preview updates as you edit).
-3. Pick the active side (A/B), add songs three ways, reorder/remove/preview them.
-4. Fill in details (title, From, To) and write a note.
+2. Customize the cassette (live preview updates as you edit; flip it to preview the note on the back).
+3. Add songs three ways, reorder/remove/preview them.
+4. Fill in details (title, From, To) and write a note (rendered on the cassette back).
 5. Save → redirected to `/mixtape/[id]` (the shareable view).
 6. Copy the link or export a PNG to send.
 
 ### 2.3 Recipient flow
 1. Open `/mixtape/[id]`.
-2. See the cassette, From/To line, tracklist (flip A/B if both have songs), and note.
+2. See the cassette front (title), From/To line, and the tracklist. Flip the cassette
+   to read the note on the back.
 3. Optionally preview tracks, copy the link, or export the card as an image.
 4. CTA to "Make your own" links back to `/`.
 
@@ -119,10 +121,9 @@ Mixtape = {
   title: string;        // defaults to labelText, then "Untitled Mixtape"
   fromName: string;
   toName: string;
-  note: string;         // max 800 chars
+  note: string;         // max 800 chars; shown on the back of the cassette
   cassette: CassetteStyle;
-  sideA: Track[];
-  sideB: Track[];
+  tracks: Track[];      // single tracklist (was sideA/sideB before v0.2.0)
   createdAt: string;    // ISO timestamp
 }
 ```
@@ -132,23 +133,27 @@ Mixtape = {
 ## 5. Feature specs
 
 ### 5.1 Customize the cassette
-**Where:** `CassetteEditor.tsx` (controls) + `Cassette.tsx` (live SVG preview) on `/`.
+**Where:** `CassetteEditor.tsx` (controls) + `Cassette.tsx` (live flip preview) on `/`.
+
+The cassette is **single-sided with a flip**: the **front** is a clean cassette (SVG)
+with the mixtape title on the label (echoing a real tape — label panel, tape window,
+spinning reels, a "90 MIN" marking); the **back** shows the note (see §5.6).
 
 Creators can adjust, with the preview re-rendering live:
-- **Label text** — title printed on the cassette (max 30 chars; defaults to "My Mixtape").
+- **Label text** — title printed on the cassette front (max 30 chars; defaults to "My Mixtape").
 - **Shell color** — 7 presets + a native custom color picker.
-- **Label color** — 5 presets.
+- **Label color** — 5 presets (used on both the front label and the back note panel).
 - **Reel color** — 5 presets.
 - **Label font** — "Handwritten" (`display`/Caveat) or "Typewriter" (`mono`/Space Mono).
-- The cassette shows the **active side** (`SIDE A`/`SIDE B`) and reels **spin** on the editor preview (`spinning` prop).
+- **Flip** — a toggle (and clicking the cassette) rotates it in 3D to preview the note
+  on the back; reels **spin** on the front of the editor preview (`spinning` prop).
 
 **Defaults:** shell `#e8533f`, label/reel `#f4ecd8`, label "My Mixtape", font `display`.
 
-### 5.2 Sides A / B
-- Two independent tracklists (`sideA`, `sideB`). A side toggle on `/` sets which side
-  new songs go to and which side the preview shows; the count is shown per side.
-- On the share page, the A/B toggle appears **only when both sides have songs**;
-  otherwise the populated side is shown by default.
+### 5.2 Tracklist
+- A **single tracklist** (`tracks`). Songs added via any of the three methods append to
+  this one list; the running count is shown next to the "Songs" heading.
+- Reorder (up/down) and remove per track. No A/B split — one continuous mixtape.
 
 ### 5.3 Adding songs (three ways)
 **Where:** `TrackAdder.tsx` (tabbed: Search / Paste a playlist / Add manually).
@@ -180,8 +185,10 @@ Creators can adjust, with the preview re-rendering live:
 
 ### 5.6 Details & note
 - **Details:** mixtape `title` (defaults to label text if blank), `From`, `To`.
-- **Note:** free-text up to **800 chars** with a live counter; rendered on the share
-  page as a slightly-rotated handwritten card (`font-display`, cream card).
+- **Note:** free-text up to **800 chars** with a live counter; rendered on the **back of
+  the cassette** (`font-display` on the label-colored panel, scrolls if long). Flip the
+  cassette — via the toggle or by clicking it — to read it on both the builder preview
+  and the share page.
 
 ### 5.7 Save
 **Where:** `page.tsx` → `POST /api/mixtapes`.
@@ -192,11 +199,13 @@ Creators can adjust, with the preview re-rendering live:
 
 ### 5.8 Share view
 **Where:** `MixtapeView.tsx` at `/mixtape/[id]` (server-fetched via `getMixtape`; 404 → `not-found.tsx`).
-- Renders From/To line, cassette (non-spinning), A/B toggle (both-sides only),
-  numbered tracklist with durations, the note card, and the creation date.
+- Renders From/To line, the flippable cassette (non-spinning), a flip toggle (shown
+  only when a note exists), the numbered tracklist with durations, and the creation date.
+- **Flip** — the toggle or clicking the cassette rotates it to reveal the note on the back.
 - **Copy share link** — copies `window.location.href` (2s "copied" confirmation).
 - **Export as image** — `html-to-image` `toPng` of the card (`pixelRatio: 2`,
-  bg `#12100e`), downloaded as `<title>-mixtape.png`.
+  bg `#12100e`), downloaded as `<title>-mixtape.png`. The export resets the cassette to
+  its **front** first, so the PNG shows the title + tracklist (the note is read by flipping).
 
 ---
 
@@ -221,7 +230,9 @@ Creators can adjust, with the preview re-rendering live:
 - Manual tracks have no art/duration/preview.
 - No duplicate-track detection when adding.
 - No drag-and-drop reordering (only up/down buttons).
-- No per-side track/time cap (real cassettes have a length limit).
+- No track/time cap (real cassettes have a length limit).
+- The PNG export shows the cassette **front** only; the note (on the back) isn't in the image.
+- Long notes scroll within the cassette back rather than resizing to fit.
 - No open-graph/social preview image for shared links.
 
 ---
@@ -230,9 +241,9 @@ Creators can adjust, with the preview re-rendering live:
 > Backlog for future iterations — not committed. Refine and pull into a spec section above when picked up.
 
 - **Edit / delete** a saved mixtape (owner token or edit link).
-- **Cassette length limit** with a running time gauge per side (e.g. 45/60/90-min tapes).
-- **More customization:** shell textures/patterns, label templates, sticker/emoji, cassette back label.
-- **Drag-and-drop** reordering; move tracks between sides.
+- **Cassette length limit** with a running time gauge (e.g. 45/60/90-min tapes).
+- **More customization:** shell textures/patterns, label templates, sticker/emoji, back-panel styling.
+- **Drag-and-drop** reordering.
 - **Open Graph image** for rich link previews (reuse the PNG export pipeline server-side).
 - **Discovery / "recently made"** gallery (needs a privacy model first).
 - **Apple Music / YouTube** track sources in addition to Spotify.
@@ -244,6 +255,13 @@ Creators can adjust, with the preview re-rendering live:
 ## 9. Changelog
 > Add an entry per shipped change: date, what changed, and which spec sections were updated.
 
+- **2026-07-19 (v0.2.0)** — Reworked the cassette from two sides (Side A / Side B) to a
+  **single-sided cassette that flips**: the front shows the mixtape title, the back shows
+  the note. Merged `sideA`/`sideB` into a single `tracks` list (store normalizes legacy
+  records on read). Updated §1.1, §2.1–2.3, §4 (data model), §5.1 (customize), §5.2
+  (now "Tracklist"), §5.6 (note on the back), §5.8 (flip + export resets to front), and
+  §7–8. `Cassette.tsx` now renders a 3D flip (front SVG / back note); the builder and
+  share view expose a flip toggle and click-to-flip.
 - **2026-07-19** — Initial PRD authored from the v0.1.0 codebase. Documents cassette
   customization, three ways to add songs, track preview/management, notes, save, and
   the share view (link + PNG export).

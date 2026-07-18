@@ -20,6 +20,34 @@ body {
   }
 }
 
+/* Cassette flip: front (title) / back (note) */
+.flip-scene {
+  perspective: 1400px;
+}
+
+.flip-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.flip-card.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-face--back {
+  transform: rotateY(180deg);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

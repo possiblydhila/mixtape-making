@@ -159,7 +159,7 @@ export default function TrackAdder({
                 track={selectedTrack}
                 autoPlay
                 onAdd={addSelectedTrack}
-                addLabel="Add to this side"
+                addLabel="Add to mixtape"
               />
             )}
 
