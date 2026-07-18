@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as CreateMixtapeInput;
 
-    if (!body.sideA?.length && !body.sideB?.length) {
+    if (!body.tracks?.length) {
       return NextResponse.json(
         { error: "Add at least one song before saving your mixtape." },
         { status: 400 }
@@ -19,8 +19,7 @@ export async function POST(req: NextRequest) {
       toName: body.toName?.trim() || "",
       note: body.note?.trim() || "",
       cassette: body.cassette,
-      sideA: body.sideA ?? [],
-      sideB: body.sideB ?? [],
+      tracks: body.tracks,
     });
 
     return NextResponse.json({ mixtape });

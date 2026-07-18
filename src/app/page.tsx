@@ -25,27 +25,23 @@ export default function HomePage() {
   const [note, setNote] = useState("");
   const [cassette, setCassette] = useState<CassetteStyle>(DEFAULT_CASSETTE);
 
-  const [activeSide, setActiveSide] = useState<"A" | "B">("A");
-  const [sideA, setSideA] = useState<Track[]>([]);
-  const [sideB, setSideB] = useState<Track[]>([]);
+  const [flipped, setFlipped] = useState(false);
+  const [tracks, setTracks] = useState<Track[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const currentTracks = activeSide === "A" ? sideA : sideB;
-  const setCurrentTracks = activeSide === "A" ? setSideA : setSideB;
-
   function addTrack(t: Track) {
-    setCurrentTracks((prev) => [...prev, t]);
+    setTracks((prev) => [...prev, t]);
   }
-  function addManyTracks(tracks: Track[]) {
-    setCurrentTracks((prev) => [...prev, ...tracks]);
+  function addManyTracks(newTracks: Track[]) {
+    setTracks((prev) => [...prev, ...newTracks]);
   }
   function removeTrack(index: number) {
-    setCurrentTracks((prev) => prev.filter((_, i) => i !== index));
+    setTracks((prev) => prev.filter((_, i) => i !== index));
   }
   function moveTrack(index: number, dir: -1 | 1) {
-    setCurrentTracks((prev) => {
+    setTracks((prev) => {
       const next = [...prev];
       const target = index + dir;
       if (target < 0 || target >= next.length) return prev;
@@ -67,8 +63,7 @@ export default function HomePage() {
           toName,
           note,
           cassette,
-          sideA,
-          sideB,
+          tracks,
         }),
       });
       const data = await res.json();
@@ -81,7 +76,7 @@ export default function HomePage() {
     }
   }
 
-  const totalTracks = sideA.length + sideB.length;
+  const totalTracks = tracks.length;
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-10">
@@ -97,23 +92,22 @@ export default function HomePage() {
         <div className="space-y-6">
           <div className="sticky top-6">
             <div className="rounded-xl p-6 bg-gradient-to-br from-cream/10 to-transparent border border-cream/10">
-              <Cassette cassette={cassette} side={activeSide} spinning />
+              <Cassette
+                cassette={cassette}
+                note={note}
+                flipped={flipped}
+                spinning
+                onFlip={() => setFlipped((f) => !f)}
+              />
             </div>
 
-            <div className="mt-4 flex gap-2 justify-center">
-              {(["A", "B"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setActiveSide(s)}
-                  className={`px-4 py-1.5 rounded-full text-sm border transition ${
-                    activeSide === s
-                      ? "bg-cream text-ink border-cream"
-                      : "border-cream/25 text-cream/60 hover:text-cream"
-                  }`}
-                >
-                  Side {s} ({s === "A" ? sideA.length : sideB.length})
-                </button>
-              ))}
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => setFlipped((f) => !f)}
+                className="px-4 py-1.5 rounded-full text-sm border border-cream/25 text-cream/70 hover:text-cream hover:border-cream/40 transition"
+              >
+                {flipped ? "↩ Show the front" : "↪ Flip to the note"}
+              </button>
             </div>
 
             <div className="mt-6 rounded-lg border border-cream/15 bg-black/20 p-5">
@@ -151,16 +145,17 @@ export default function HomePage() {
 
           <div>
             <h2 className="text-sm uppercase tracking-wide text-cream/60 mb-2">
-              Songs — Side {activeSide}
+              Songs {tracks.length > 0 && <span className="text-cream/40">({tracks.length})</span>}
             </h2>
             <TrackAdder onAdd={addTrack} onAddMany={addManyTracks} />
             <div className="mt-3">
-              <TrackList tracks={currentTracks} onRemove={removeTrack} onMove={moveTrack} />
+              <TrackList tracks={tracks} onRemove={removeTrack} onMove={moveTrack} />
             </div>
           </div>
 
           <div className="rounded-lg border border-cream/15 bg-black/20 p-5">
-            <h2 className="text-sm uppercase tracking-wide text-cream/60 mb-2">A little note</h2>
+            <h2 className="text-sm uppercase tracking-wide text-cream/60 mb-1">A little note</h2>
+            <p className="text-xs text-cream/40 mb-2">Shown on the back of the cassette — flip the preview to see it.</p>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}

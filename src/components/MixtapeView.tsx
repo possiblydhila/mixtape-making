@@ -14,12 +14,12 @@ function formatDuration(ms?: number) {
 }
 
 export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
-  const [side, setSide] = useState<"A" | "B">(mixtape.sideA.length ? "A" : "B");
+  const [flipped, setFlipped] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const tracks = side === "A" ? mixtape.sideA : mixtape.sideB;
+  const { tracks, note } = mixtape;
 
   async function copyLink() {
     try {
@@ -34,6 +34,11 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
   async function exportImage() {
     if (!cardRef.current) return;
     setExporting(true);
+    // The note lives on the back of the cassette; make sure we capture the front.
+    if (flipped) {
+      setFlipped(false);
+      await new Promise((r) => setTimeout(r, 750));
+    }
     try {
       const { toPng } = await import("html-to-image");
       const dataUrl = await toPng(cardRef.current, { pixelRatio: 2, backgroundColor: "#12100e" });
@@ -80,22 +85,22 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
         )}
 
         <div className="max-w-md mx-auto">
-          <Cassette cassette={mixtape.cassette} side={side} />
+          <Cassette
+            cassette={mixtape.cassette}
+            note={note}
+            flipped={flipped}
+            onFlip={note ? () => setFlipped((f) => !f) : undefined}
+          />
         </div>
 
-        {mixtape.sideA.length > 0 && mixtape.sideB.length > 0 && (
-          <div className="mt-4 flex gap-2 justify-center">
-            {(["A", "B"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSide(s)}
-                className={`px-4 py-1.5 rounded-full text-sm border transition ${
-                  side === s ? "bg-cream text-ink border-cream" : "border-cream/25 text-cream/60 hover:text-cream"
-                }`}
-              >
-                Side {s}
-              </button>
-            ))}
+        {note && (
+          <div className="mt-4 flex justify-center">
+            <button
+              onClick={() => setFlipped((f) => !f)}
+              className="px-4 py-1.5 rounded-full text-sm border border-cream/25 text-cream/70 hover:text-cream hover:border-cream/40 transition"
+            >
+              {flipped ? "↩ Back to the tracklist" : "↪ Flip to read the note"}
+            </button>
           </div>
         )}
 
@@ -111,15 +116,7 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
           ))}
         </ol>
 
-        {mixtape.note && (
-          <div className="mt-8 max-w-md mx-auto">
-            <div className="rounded-lg bg-cream/95 text-ink p-5 font-display text-xl leading-relaxed shadow-tape rotate-[-0.6deg]">
-              {mixtape.note}
-            </div>
-          </div>
-        )}
-
-        <p className="mt-6 text-center text-xs text-cream/25 font-mono">
+        <p className="mt-8 text-center text-xs text-cream/25 font-mono">
           made {new Date(mixtape.createdAt).toLocaleDateString()}
         </p>
       </div>

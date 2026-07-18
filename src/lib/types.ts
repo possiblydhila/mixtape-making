@@ -25,8 +25,7 @@ export type Mixtape = {
   toName: string;
   note: string;
   cassette: CassetteStyle;
-  sideA: Track[];
-  sideB: Track[];
+  tracks: Track[];
   createdAt: string;
 };
 

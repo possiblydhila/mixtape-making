@@ -20,11 +20,19 @@ function ensureStore(): void {
   }
 }
 
+// Older records stored songs as `sideA` / `sideB`. The app now uses a single
+// `tracks` list, so fold any legacy sides into `tracks` when reading.
+function normalize(raw: any): Mixtape {
+  if (Array.isArray(raw?.tracks)) return raw as Mixtape;
+  const { sideA, sideB, ...rest } = raw ?? {};
+  return { ...rest, tracks: [...(sideA ?? []), ...(sideB ?? [])] } as Mixtape;
+}
+
 function readAll(): Mixtape[] {
   ensureStore();
   const raw = fs.readFileSync(DATA_FILE, "utf-8");
   try {
-    return JSON.parse(raw).mixtapes as Mixtape[];
+    return (JSON.parse(raw).mixtapes as any[]).map(normalize);
   } catch {
     return [];
   }
