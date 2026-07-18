@@ -224,11 +224,15 @@ wizard fields from an existing tape via the `seed` prop, then saves a **new** mi
 - Renders a "for {to} — from {from}" line, the flippable cassette, a flip toggle (shown
   only when a note exists), a **PREV / PLAY / NEXT transport**, the numbered tracklist, and
   the creation date.
-- **Transport** — a single `<audio>` element plays 30-second previews across the
-  tracklist: PLAY toggles the current track, PREV/NEXT skip to the adjacent **previewable**
-  track, playback auto-advances on end, and the current track is highlighted (tap a row to
-  select it). Hidden entirely when no track has a preview. Manual/preview-less tracks are
-  skipped and can't be played.
+- **Transport (cassette deck)** — PREV / PLAY / NEXT step through the tracklist in queue
+  order, one track at a time (current row highlighted; tap a row to jump; PREV/NEXT disabled
+  at the ends). While "playing", the cassette **reels spin** (`spinning` prop) and a
+  "Now n/total · Title — Artist" line shows the position. PLAY plays the current track's
+  30-second `<audio>` **preview** when Spotify provides one and **auto-advances** to the
+  next track when it ends. Note: Spotify no longer returns `preview_url` for most tracks, so
+  the deck often rolls **silently** (reels spin, queue advances, no audio) — there is no
+  embed/iframe. Full playback would require the Spotify Web Playback SDK (user login +
+  Premium), which is out of scope.
 - **Remix** — navigates to `/mixtape/[id]/remix` (wizard seeded from this tape → new copy).
 - **Share** — copies `window.location.href` (2s "copied" confirmation).
 - **Export as image** — `html-to-image` `toPng` of the card (`pixelRatio: 2`,
