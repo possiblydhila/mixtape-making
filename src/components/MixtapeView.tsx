@@ -22,83 +22,59 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
   const [exporting, setExporting] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Tracklist transport (30s previews)
-  const anyPreview = tracks.some((t) => t.previewUrl);
-  const firstPlayable = tracks.findIndex((t) => t.previewUrl);
-  const [currentIndex, setCurrentIndex] = useState(firstPlayable === -1 ? 0 : firstPlayable);
+  // Cassette-deck transport: play the tracklist in queue order, one at a time.
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  const hasTracks = tracks.length > 0;
   const currentTrack = tracks[currentIndex];
-  const currentHasPreview = Boolean(currentTrack?.previewUrl);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < tracks.length - 1;
 
-  function findPlayable(from: number, dir: 1 | -1) {
-    for (let i = from; i >= 0 && i < tracks.length; i += dir) {
-      if (tracks[i]?.previewUrl) return i;
-    }
-    return -1;
-  }
-  const hasNext = findPlayable(currentIndex + 1, 1) !== -1;
-  const hasPrev = findPlayable(currentIndex - 1, -1) !== -1;
-
-  function playIndex(index: number) {
+  // Load + play the current track's preview if it has one (Spotify only returns
+  // previews for some tracks; when there's none the "tape" still rolls silently).
+  function playPreview(index: number) {
     const audio = audioRef.current;
     const track = tracks[index];
-    if (!audio || !track?.previewUrl) {
-      setPlaying(false);
-      return;
-    }
+    if (!audio || !track?.previewUrl) return;
     if (audio.src !== track.previewUrl) audio.src = track.previewUrl;
-    audio
-      .play()
-      .then(() => setPlaying(true))
-      .catch(() => setPlaying(false));
+    audio.play().catch(() => {});
   }
 
   function togglePlay() {
+    if (!hasTracks) return;
     const audio = audioRef.current;
-    if (!audio || !currentHasPreview) return;
     if (playing) {
-      audio.pause();
+      audio?.pause();
       setPlaying(false);
     } else {
-      playIndex(currentIndex);
+      setPlaying(true);
+      playPreview(currentIndex);
     }
   }
 
-  function skip(dir: 1 | -1) {
-    const next = findPlayable(currentIndex + dir, dir);
-    if (next === -1) return;
-    setCurrentIndex(next);
-    playIndex(next);
-  }
-
-  function selectTrack(index: number) {
+  function go(index: number) {
+    if (index < 0 || index >= tracks.length) return;
     setCurrentIndex(index);
-    if (tracks[index]?.previewUrl) playIndex(index);
-    else {
-      audioRef.current?.pause();
-      setPlaying(false);
-    }
+    const audio = audioRef.current;
+    audio?.pause();
+    if (audio) audio.currentTime = 0;
+    if (playing) playPreview(index);
   }
 
-  // Auto-advance to the next previewable track when one finishes.
+  // When a preview finishes, advance to the next track like a tape rolling on.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const onEnded = () => {
-      const next = findPlayable(currentIndex + 1, 1);
-      if (next === -1) {
-        setPlaying(false);
-        return;
-      }
-      setCurrentIndex(next);
-      playIndex(next);
+      if (currentIndex + 1 < tracks.length) go(currentIndex + 1);
+      else setPlaying(false);
     };
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, tracks]);
+  }, [currentIndex, tracks, playing]);
 
   // Pause playback when leaving the page.
   useEffect(() => {
@@ -152,6 +128,7 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
           cassette={mixtape.cassette}
           note={note}
           flipped={flipped}
+          spinning={playing}
           onFlip={note ? () => setFlipped((f) => !f) : undefined}
         />
 
@@ -167,32 +144,44 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
         )}
 
         {/* Transport */}
-        {anyPreview && (
-          <div className="mt-6 grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => skip(-1)}
-              disabled={!hasPrev}
-              className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
-            >
-              Prev
-            </button>
-            <button
-              type="button"
-              onClick={togglePlay}
-              disabled={!currentHasPreview}
-              className="py-3 rounded-md bg-cream text-ink font-semibold uppercase tracking-wide text-sm hover:bg-cream/90 disabled:opacity-40 transition"
-            >
-              {playing ? "Pause" : "Play"}
-            </button>
-            <button
-              type="button"
-              onClick={() => skip(1)}
-              disabled={!hasNext}
-              className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
-            >
-              Next
-            </button>
+        {hasTracks && (
+          <div className="mt-6">
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => go(currentIndex - 1)}
+                disabled={!hasPrev}
+                className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
+                aria-label="Previous track"
+              >
+                ⏮ Prev
+              </button>
+              <button
+                type="button"
+                onClick={togglePlay}
+                className="py-3 rounded-md bg-cream text-ink font-semibold uppercase tracking-wide text-sm hover:bg-cream/90 transition"
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? "⏸ Pause" : "▶ Play"}
+              </button>
+              <button
+                type="button"
+                onClick={() => go(currentIndex + 1)}
+                disabled={!hasNext}
+                className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
+                aria-label="Next track"
+              >
+                Next ⏭
+              </button>
+            </div>
+
+            {currentTrack && (
+              <p className="mt-3 text-xs text-cream/50 text-center truncate">
+                <span className="text-cream/40 uppercase tracking-wide">Now</span>{" "}
+                {currentIndex + 1}/{tracks.length} · {currentTrack.title}{" "}
+                <span className="text-cream/40">— {currentTrack.artist}</span>
+              </p>
+            )}
           </div>
         )}
 
@@ -204,7 +193,7 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
               <li key={`${t.id}-${i}`}>
                 <button
                   type="button"
-                  onClick={() => selectTrack(i)}
+                  onClick={() => go(i)}
                   className={`w-full flex items-center gap-2 text-sm rounded-md px-2 py-2 text-left transition border ${
                     isCurrent
                       ? "bg-cream/10 border-cream/25"
