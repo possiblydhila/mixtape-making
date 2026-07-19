@@ -29,9 +29,10 @@ on dark, a live SVG cassette with spinning reels, handwritten (Caveat) and typew
 (Design → Songs → Note → Recipient) to keep each screen light and low-friction.
 
 ### 1.3 Non-goals (current)
-- Not a music streaming/playback product — audio is limited to 30-second Spotify
-  previews (or an embed fallback).
-- No user accounts, auth, or private/ownership model (anyone with the link can view).
+- No **app account** — you never sign up for Mixtape itself. (Playback is an *optional*
+  Spotify connect: a listener may log in with their own Spotify **Premium** account to hear
+  full tracks; it's not required to view or share.)
+- No private/ownership model on mixtapes (anyone with the link can view).
 - No **in-place editing** of a saved mixtape — "Remix" instead duplicates a tape into the
   wizard and saves a **new** mixtape; the original is immutable once created.
 - Not built for high-scale multi-tenant use (single JSON file store).
@@ -65,8 +66,11 @@ untouched.
 1. Open `/mixtape/[id]`.
 2. See a "for {to} — from {from}" line, the cassette front (title), and the tracklist.
    Flip the cassette to read the note on the back.
-3. Use the **PREV / PLAY / NEXT** transport to play 30-second previews across the
-   tracklist (auto-advances, skips preview-less tracks; the current track is highlighted).
+3. Playback via the **PREV / PLAY / NEXT** transport uses the **Spotify Web Playback SDK**:
+   click **Connect Spotify** (one-time OAuth) and, if the account is **Premium**, the tape
+   plays full tracks in-page — reels spin, the queue auto-advances, the current track
+   highlights. Not connected or not Premium → a silent visual deck (Spotify no longer serves
+   30s previews). See §5.8.
 4. **Remix** (opens the wizard seeded from this tape to make your own new copy), **Share**
    (copies the link), or export the card as an image.
 
@@ -86,7 +90,11 @@ untouched.
 
 ### 3.1 Key modules
 - `src/lib/types.ts` — shared types (`Track`, `CassetteStyle`, `Mixtape`, `CreateMixtapeInput`).
-- `src/lib/spotify.ts` — token caching, `searchTracks`, `getPlaylistTracks` (paginated), `extractPlaylistId`, `mapSpotifyTrack`.
+- `src/lib/spotify.ts` — Client-Credentials token caching, `searchTracks`, `getPlaylistTracks` (paginated), `extractPlaylistId`, `mapSpotifyTrack`.
+- `src/lib/spotifyAuth.ts` — Authorization-Code helpers for user login (`buildAuthorizeUrl`,
+  `exchangeCode`, `refreshAccessToken`, cookie-name + scope constants).
+- `src/lib/useSpotifyPlayer.ts` — client hook wrapping the Spotify Web Playback SDK (loads
+  the SDK, creates the player, exposes `play/toggle/next/prev/disconnect` + status).
 - `src/lib/store.ts` — `createMixtape`, `getMixtape`, `listMixtapes` (the only surface the
   rest of the app depends on; swappable for a real DB).
 - `src/components/MixtapeBuilder.tsx` — the 4-step wizard (used for create at `/` and for
@@ -101,10 +109,20 @@ untouched.
 | `/api/mixtapes/[id]` | GET | Fetch one mixtape (404 if missing). |
 | `/api/spotify/search?q=` | GET | Proxy Spotify track search (keeps secret server-side). |
 | `/api/spotify/playlist?url=` | GET | Resolve a playlist link → `{ name, tracks }`. |
+| `/api/spotify/auth/login` | GET | Start user OAuth (`?returnTo=`); 302 → Spotify authorize. |
+| `/api/spotify/auth/callback` | GET | OAuth callback; sets httpOnly token cookies; 302 back to `returnTo`. |
+| `/api/spotify/auth/token` | GET | Return a valid user access token for the SDK (refreshes; 401 if not connected). |
+| `/api/spotify/auth/logout` | POST | Clear the Spotify token cookies. |
 
 ### 3.3 Environment
-- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` — server-side only, for search/playlist import.
-- `NEXT_PUBLIC_BASE_URL` — base URL used for building shareable links (defaults to `http://localhost:3000`).
+- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` — server-side only; used for search/playlist
+  import (Client Credentials) **and** the user-login token exchange (Authorization Code).
+- `NEXT_PUBLIC_BASE_URL` — base URL for shareable links **and** the OAuth redirect URI
+  (`${base}/api/spotify/auth/callback`). For local dev use `http://127.0.0.1:3000` — Spotify
+  rejects `http://localhost` as a redirect URI.
+- **Spotify dashboard:** the redirect URI above must be registered under the app's
+  Settings → Redirect URIs. Playback requires each listener to log in with a **Premium**
+  account (`streaming user-read-email user-read-private` scopes are requested at login).
 
 ---
 
@@ -224,15 +242,19 @@ wizard fields from an existing tape via the `seed` prop, then saves a **new** mi
 - Renders a "for {to} — from {from}" line, the flippable cassette, a flip toggle (shown
   only when a note exists), a **PREV / PLAY / NEXT transport**, the numbered tracklist, and
   the creation date.
-- **Transport (cassette deck)** — PREV / PLAY / NEXT step through the tracklist in queue
-  order, one track at a time (current row highlighted; tap a row to jump; PREV/NEXT disabled
-  at the ends). While "playing", the cassette **reels spin** (`spinning` prop) and a
-  "Now n/total · Title — Artist" line shows the position. PLAY plays the current track's
-  30-second `<audio>` **preview** when Spotify provides one and **auto-advances** to the
-  next track when it ends. Note: Spotify no longer returns `preview_url` for most tracks, so
-  the deck often rolls **silently** (reels spin, queue advances, no audio) — there is no
-  embed/iframe. Full playback would require the Spotify Web Playback SDK (user login +
-  Premium), which is out of scope.
+- **Transport (Spotify Web Playback SDK)** — PREV / PLAY / NEXT over the tracklist, backed by
+  `useSpotifyPlayer.ts`. Because Spotify stopped serving 30s `preview_url`s, real audio needs
+  a logged-in **Premium** user:
+  - **Not connected:** the middle button becomes **Connect Spotify** (→ `/api/spotify/auth/login`).
+    PREV/NEXT still move a local highlight; no audio, reels still.
+  - **Connected + Premium:** PLAY starts the mixtape (`PUT /v1/me/player/play` with the full
+    `spotify:track:…` URI list); PLAY/pause + PREV/NEXT drive the SDK; playback **auto-advances**;
+    the cassette **reels spin** while playing; the current track highlights (synced from the
+    SDK's `player_state_changed` by URI); a "Now n/total · Title — Artist" line shows position.
+    A "Connected · Disconnect" toggle clears the session.
+  - **Connected, not Premium:** shows "Spotify Premium is required to play"; deck stays silent.
+  - **Manual tracks** (no Spotify id) are shown but marked "not on Spotify" and skipped in playback.
+  - Only real Spotify tracks are playable; a mixtape with none shows "No Spotify tracks to play".
 - **Remix** — navigates to `/mixtape/[id]/remix` (wizard seeded from this tape → new copy).
 - **Share** — copies `window.location.href` (2s "copied" confirmation).
 - **Export as image** — `html-to-image` `toPng` of the card (`pixelRatio: 2`,
@@ -250,13 +272,21 @@ wizard fields from an existing tape via the `seed` prop, then saves a **new** mi
 - **Concurrency:** file store reads/writes the whole file with no locking; not safe for
   heavy concurrent writes.
 - **Spotify limits:** search returns up to 10 results; playlist import is public
-  playlists only; preview availability varies by track/market.
+  playlists only. Spotify **no longer returns 30s `preview_url`s** for Client-Credentials
+  apps, so in-page playback relies entirely on the Web Playback SDK (user login + Premium).
+- **Playback auth:** user access/refresh tokens live in **httpOnly cookies**; the refresh
+  token never reaches the browser (only short-lived access tokens, which the SDK needs). No
+  ownership link between a Spotify login and a mixtape — connecting only enables playback.
+  The redirect URI must be registered in the Spotify dashboard and must use `127.0.0.1`
+  (not `localhost`) for local dev.
 - **Privacy:** anyone with a link can view; ids are `nanoid(10)` (unguessable but not access-controlled).
-- **Accessibility:** buttons carry `aria-label`s; audio elements are hidden with lint exceptions for captions.
+- **Accessibility:** buttons carry `aria-label`s.
 
 ---
 
 ## 7. Known limitations / gaps
+- **Playback needs Spotify Premium + login per listener** — free/not-logged-in recipients
+  get a silent visual deck. Heavy for a "send a link" flow; the tradeoff of full-track audio.
 - No **in-place edit** of a saved mixtape — Remix makes an independent copy, so fixing a
   typo means creating a new tape/link (the old one lingers).
 - No **delete** of a saved mixtape.
@@ -281,7 +311,8 @@ wizard fields from an existing tape via the `seed` prop, then saves a **new** mi
 - **Open Graph image** for rich link previews (reuse the PNG export pipeline server-side).
 - **Discovery / "recently made"** gallery (needs a privacy model first).
 - **Apple Music / YouTube** track sources in addition to Spotify.
-- **Full playback** via Spotify embed for the whole tracklist on the share page.
+- **Playback without Premium** — e.g. Deezer 30s previews as a fallback audio source so
+  non-Premium recipients hear *something*, or Apple Music previews.
 - **Themes / seasonal skins** for the cassette and card.
 
 ---
@@ -289,6 +320,18 @@ wizard fields from an existing tape via the `seed` prop, then saves a **new** mi
 ## 9. Changelog
 > Add an entry per shipped change: date, what changed, and which spec sections were updated.
 
+- **2026-07-19 (v0.4.0)** — **Full-track playback on the share view via the Spotify Web
+  Playback SDK.** Spotify stopped returning 30s `preview_url`s (confirmed: null for all
+  search results), so the old preview/embed transport had no audio. Added the app's first
+  user-auth — an Authorization-Code OAuth flow (`src/lib/spotifyAuth.ts` +
+  `/api/spotify/auth/{login,callback,token,logout}`, tokens in httpOnly cookies) — and a
+  `useSpotifyPlayer` hook that loads the Web Playback SDK and plays the mixtape's
+  `spotify:track:…` URIs. `MixtapeView` now shows **Connect Spotify** when signed out and,
+  once connected with **Premium**, drives full-track PLAY/PREV/NEXT (auto-advance, spinning
+  reels, URI-synced highlight); not-connected/non-Premium keep a silent visual deck. Updated
+  `.env.example` (redirect URI + `127.0.0.1` rule + Premium note) and PRD §1.3, §2.3, §3.1–3.3,
+  §5.8, §6, §7–8. **Setup:** register `${NEXT_PUBLIC_BASE_URL}/api/spotify/auth/callback` in
+  the Spotify dashboard; playback requires a Premium login.
 - **2026-07-19 (v0.3.0)** — **Relayed out the builder as a mobile-first 4-step wizard**
   (Design → Songs → Note → Recipient) to cut cognitive load, with a step-progress
   indicator and a live cassette preview on every step. Consolidated the separate mixtape

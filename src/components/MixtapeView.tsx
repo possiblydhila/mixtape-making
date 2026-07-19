@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Cassette from "@/components/Cassette";
-import type { Mixtape } from "@/lib/types";
+import { useSpotifyPlayer } from "@/lib/useSpotifyPlayer";
+import type { Mixtape, Track } from "@/lib/types";
 
 function formatDuration(ms?: number) {
   if (!ms) return "";
@@ -13,74 +14,77 @@ function formatDuration(ms?: number) {
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
+// A playable Spotify URI, or null for manual (non-Spotify) tracks.
+function trackUri(t: Track): string | null {
+  return t.source === "spotify" && t.id && !t.id.startsWith("manual-")
+    ? `spotify:track:${t.id}`
+    : null;
+}
+
 export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { tracks, note } = mixtape;
 
   const [flipped, setFlipped] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [connectError, setConnectError] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Cassette-deck transport: play the tracklist in queue order, one at a time.
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  const hasTracks = tracks.length > 0;
-  const currentTrack = tracks[currentIndex];
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < tracks.length - 1;
-
-  // Load + play the current track's preview if it has one (Spotify only returns
-  // previews for some tracks; when there's none the "tape" still rolls silently).
-  function playPreview(index: number) {
-    const audio = audioRef.current;
-    const track = tracks[index];
-    if (!audio || !track?.previewUrl) return;
-    if (audio.src !== track.previewUrl) audio.src = track.previewUrl;
-    audio.play().catch(() => {});
-  }
-
-  function togglePlay() {
-    if (!hasTracks) return;
-    const audio = audioRef.current;
-    if (playing) {
-      audio?.pause();
-      setPlaying(false);
-    } else {
-      setPlaying(true);
-      playPreview(currentIndex);
+  // Ordered list of playable Spotify URIs (manual tracks are skipped).
+  const uris: string[] = [];
+  const uriToPos = new Map<string, number>();
+  for (const t of tracks) {
+    const uri = trackUri(t);
+    if (uri) {
+      uriToPos.set(uri, uris.length);
+      uris.push(uri);
     }
   }
+  const hasPlayable = uris.length > 0;
 
-  function go(index: number) {
-    if (index < 0 || index >= tracks.length) return;
-    setCurrentIndex(index);
-    const audio = audioRef.current;
-    audio?.pause();
-    if (audio) audio.currentTime = 0;
-    if (playing) playPreview(index);
-  }
+  const player = useSpotifyPlayer(uris, pathname || `/mixtape/${mixtape.id}`);
+  const connected = player.status === "connected";
+  const canPlay = connected && player.ready && !player.needsPremium && hasPlayable;
 
-  // When a preview finishes, advance to the next track like a tape rolling on.
+  // Which row is highlighted: the SDK's current track when playing, else a local
+  // cursor used for the silent (not-connected) deck.
+  const [localIndex, setLocalIndex] = useState(0);
+  const sdkIndex = player.currentUri
+    ? tracks.findIndex((t) => trackUri(t) === player.currentUri)
+    : -1;
+  const currentIndex = canPlay && sdkIndex >= 0 ? sdkIndex : localIndex;
+  const currentTrack = tracks[currentIndex];
+
+  const atStart = !canPlay && currentIndex <= 0;
+  const atEnd = !canPlay && currentIndex >= tracks.length - 1;
+
+  // Surface a failed Spotify connection (?spotify=error from the callback).
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onEnded = () => {
-      if (currentIndex + 1 < tracks.length) go(currentIndex + 1);
-      else setPlaying(false);
-    };
-    audio.addEventListener("ended", onEnded);
-    return () => audio.removeEventListener("ended", onEnded);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, tracks, playing]);
-
-  // Pause playback when leaving the page.
-  useEffect(() => {
-    const audio = audioRef.current;
-    return () => audio?.pause();
+    if (typeof window !== "undefined" && window.location.search.includes("spotify=error")) {
+      setConnectError(true);
+    }
   }, []);
+
+  function onPrev() {
+    if (canPlay) player.prev();
+    else setLocalIndex((i) => Math.max(0, i - 1));
+  }
+  function onNext() {
+    if (canPlay) player.next();
+    else setLocalIndex((i) => Math.min(tracks.length - 1, i + 1));
+  }
+  function onPlay() {
+    if (!canPlay) return;
+    if (player.playing || player.currentUri) player.toggle();
+    else player.play(0);
+  }
+  function onRow(i: number) {
+    const uri = trackUri(tracks[i]);
+    if (canPlay && uri) player.play(uriToPos.get(uri)!);
+    else if (!connected) setLocalIndex(i);
+  }
 
   async function copyLink() {
     try {
@@ -95,7 +99,6 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
   async function exportImage() {
     if (!cardRef.current) return;
     setExporting(true);
-    // The note lives on the back of the cassette; make sure we capture the front.
     if (flipped) {
       setFlipped(false);
       await new Promise((r) => setTimeout(r, 750));
@@ -114,6 +117,8 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
     }
   }
 
+  const playLabel = player.playing ? "⏸ Pause" : "▶ Play";
+
   return (
     <main className="max-w-md mx-auto px-4 py-8">
       <div ref={cardRef} className="rounded-2xl bg-[#1a1512] border border-cream/10 p-6">
@@ -128,7 +133,7 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
           cassette={mixtape.cassette}
           note={note}
           flipped={flipped}
-          spinning={playing}
+          spinning={canPlay && player.playing}
           onFlip={note ? () => setFlipped((f) => !f) : undefined}
         />
 
@@ -144,30 +149,45 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
         )}
 
         {/* Transport */}
-        {hasTracks && (
+        {tracks.length > 0 && (
           <div className="mt-6">
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => go(currentIndex - 1)}
-                disabled={!hasPrev}
+                onClick={onPrev}
+                disabled={atStart}
                 className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
                 aria-label="Previous track"
               >
                 ⏮ Prev
               </button>
+
+              {connected ? (
+                <button
+                  type="button"
+                  onClick={onPlay}
+                  disabled={!canPlay}
+                  className="py-3 rounded-md bg-cream text-ink font-semibold uppercase tracking-wide text-sm hover:bg-cream/90 disabled:opacity-40 transition"
+                  aria-label={player.playing ? "Pause" : "Play"}
+                >
+                  {player.needsPremium ? "Premium only" : !player.ready ? "Loading…" : playLabel}
+                </button>
+              ) : (
+                <a
+                  href={hasPlayable ? player.connectUrl : undefined}
+                  aria-disabled={!hasPlayable}
+                  className={`py-3 rounded-md bg-green-500 text-white font-semibold uppercase tracking-wide text-xs flex items-center justify-center text-center transition ${
+                    hasPlayable ? "hover:bg-green-400" : "opacity-40 pointer-events-none"
+                  }`}
+                >
+                  Connect Spotify
+                </a>
+              )}
+
               <button
                 type="button"
-                onClick={togglePlay}
-                className="py-3 rounded-md bg-cream text-ink font-semibold uppercase tracking-wide text-sm hover:bg-cream/90 transition"
-                aria-label={playing ? "Pause" : "Play"}
-              >
-                {playing ? "⏸ Pause" : "▶ Play"}
-              </button>
-              <button
-                type="button"
-                onClick={() => go(currentIndex + 1)}
-                disabled={!hasNext}
+                onClick={onNext}
+                disabled={atEnd}
                 className="py-3 rounded-md border border-cream/25 text-cream/80 font-semibold uppercase tracking-wide text-sm hover:bg-cream/10 disabled:opacity-30 transition"
                 aria-label="Next track"
               >
@@ -182,6 +202,25 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
                 <span className="text-cream/40">— {currentTrack.artist}</span>
               </p>
             )}
+
+            {/* Playback status / help line */}
+            <p className="mt-1 text-[11px] text-center text-cream/40">
+              {!hasPlayable ? (
+                "No Spotify tracks in this mixtape to play."
+              ) : connectError ? (
+                <span className="text-red-400">Couldn&apos;t connect to Spotify — try again.</span>
+              ) : player.needsPremium ? (
+                "Spotify Premium is required to play the songs."
+              ) : connected && player.ready ? (
+                <button onClick={player.disconnect} className="hover:text-cream underline">
+                  Connected to Spotify · Disconnect
+                </button>
+              ) : connected ? (
+                "Starting Spotify player…"
+              ) : (
+                "Connect your Spotify Premium to play the full songs."
+              )}
+            </p>
           </div>
         )}
 
@@ -189,11 +228,12 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
         <ol className="mt-5 space-y-1">
           {tracks.map((t, i) => {
             const isCurrent = i === currentIndex;
+            const playable = Boolean(trackUri(t));
             return (
               <li key={`${t.id}-${i}`}>
                 <button
                   type="button"
-                  onClick={() => go(i)}
+                  onClick={() => onRow(i)}
                   className={`w-full flex items-center gap-2 text-sm rounded-md px-2 py-2 text-left transition border ${
                     isCurrent
                       ? "bg-cream/10 border-cream/25"
@@ -201,10 +241,11 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
                   }`}
                 >
                   <span className="w-5 text-cream/40 flex-shrink-0">
-                    {isCurrent && playing ? "♪" : i + 1}
+                    {isCurrent && canPlay && player.playing ? "♪" : i + 1}
                   </span>
                   <span className="flex-1 truncate">
                     {t.title} <span className="text-cream/40">— {t.artist}</span>
+                    {!playable && <span className="text-cream/25 text-xs"> · not on Spotify</span>}
                   </span>
                   {t.durationMs ? (
                     <span className="text-cream/30 text-xs flex-shrink-0">{formatDuration(t.durationMs)}</span>
@@ -245,9 +286,6 @@ export default function MixtapeView({ mixtape }: { mixtape: Mixtape }) {
           {exporting ? "Exporting…" : "or export as an image"}
         </button>
       </div>
-
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={audioRef} preload="none" className="hidden" />
     </main>
   );
 }
